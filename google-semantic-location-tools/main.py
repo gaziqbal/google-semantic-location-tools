@@ -19,7 +19,7 @@ PlaceCoordinates = typing.Tuple[float, float]
 PlaceId = str
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class PlaceVisit:
     id: PlaceId
     start_time: datetime
@@ -139,7 +139,7 @@ def semantic_history_extract_place_visits(source_dir: str, output_file: str):
     logger.info(f"Wrote {num_rows} records to {output_file}")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class PlaceAddress:
     formattedAddress: str
     adminDistrictMinor: str
@@ -148,13 +148,15 @@ class PlaceAddress:
     countryCode: str
 
 
-@dataclasses.dataclass
-class PlaceVisitWithAddress(PlaceVisit):
-    address: PlaceAddress
+@dataclasses.dataclass(frozen=True)
+class PlaceVisitWithAddress(PlaceVisit, PlaceAddress):
+    pass
 
 
 def semantic_history_annotate_place_visits(
-    source_file: str, bing_api_key: str, output_file: str
+    source_file: str,
+    output_file: str,
+    bing_api_key: str,
 ):
     geolocator = Bing(bing_api_key)
     num_lookups = 0
@@ -191,13 +193,71 @@ def semantic_history_annotate_place_visits(
                     )
                     coordinates_to_address[coordinates] = address
                     logger.debug(
-                        f"Performed Geo lookup {num_lookups} - {coordinates} -> {address.formattedAddress}"
+                        f"Geo lookup {num_lookups} - {coordinates} -> {address.formattedAddress}"
                     )
                 output_row = row
                 output_row.update(address.__dict__)
                 csv_writer.writerow(output_row)
                 num_rows += 1
-    logger.info(f"Performed {num_lookups}, Wrote {num_rows} records to {output_file}")
+    logger.info(
+        f"Performed {num_lookups} lookups. Wrote {num_rows} records to {output_file}"
+    )
+
+
+def semantic_history_extract_trips(
+    source_file: str, output_file: str, region_delimiter: str
+):
+    num_trips = 0
+    with open(source_file, "r") as source_csv:
+        source_field_names = [field.name for field in dataclasses.fields(PlaceVisit)]
+        source_field_names.extend(
+            [field.name for field in dataclasses.fields(PlaceAddress)]
+        )
+        csv_reader = csv.DictReader(source_csv, fieldnames=source_field_names)
+        next(csv_reader)
+        with open(output_file, "w") as output_csv:
+            output_field_names = [
+                region_delimiter,
+                "start_time",
+                "end_time",
+                "duration",
+            ]
+            csv_writer = csv.DictWriter(output_csv, fieldnames=output_field_names)
+            csv_writer.writeheader()
+            trip_region: str = None
+            trip_start: datetime = None
+
+            def write_trip(region, start_time, end_time):
+                duration = end_time - start_time
+                quantized_duration = timedelta(
+                    days=duration.days, seconds=duration.seconds
+                )
+                output_row = {
+                    region_delimiter: region,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": quantized_duration,
+                }
+                csv_writer.writerow(output_row)
+
+            for row in csv_reader:
+                visit = PlaceVisitWithAddress(**row)
+                current_region = getattr(visit, region_delimiter)
+                if trip_region != current_region:
+                    if trip_region is not None:
+                        # A trip completed
+                        assert trip_start != None
+                        trip_end = datetime.fromisoformat(visit.start_time)
+                        write_trip(trip_region, trip_start, trip_end)
+                        num_trips += 1
+                    trip_region = current_region
+                    trip_start = datetime.fromisoformat(visit.start_time)
+
+            trip_end = datetime.fromisoformat(visit.start_time)
+            write_trip(current_region, trip_start, trip_end)
+            num_trips += 1
+
+    logger.info(f"Extracted {num_trips} trips to {output_file}")
 
 
 # Entry point
@@ -244,28 +304,41 @@ if __name__ == "__main__":
 
     def annotate_command(args):
         semantic_history_annotate_place_visits(
-            args.source_file, args.geolookup_bing_api_key, args.output_file
+            args.source_file,
+            args.output_file,
+            args.geolookup_bing_api_key,
         )
 
     parser_annotate.set_defaults(func=annotate_command)
 
-    # parser_annotate = subparsers.add_parser(
-    #     "trips",
-    #     help="Build trip history from annotated place visits using on city, state or country",
-    # )
-    # parser_annotate.add_argument("--source_file", required=True)
-    # # parser_annotate.add_argument("--property", required=True)
-    # parser_annotate.add_argument("--out_file", default="trips.csv")
-    # parser_annotate.set_defaults(func=extract_trips)
+    parser_annotate = subparsers.add_parser(
+        "trips",
+        help="Build trip history from annotated place visits using a regional delimiter",
+    )
+    parser_annotate.add_argument(
+        "source_file", help="CSV file of annotated place visits."
+    )
+    parser_annotate.add_argument(
+        "--region_delimiter",
+        choices=["adminMajor, adminMinor, postalCode, countryCode"],
+        default="countryCode",
+    )
+    parser_annotate.add_argument("--output_file", default="trips.csv")
+
+    def trips_command(args):
+        region_mapping = {
+            "adminMajor": "adminDistrictMajor",
+            "adminMinor": "adminDistrictMinor",
+            "postalCode": "postalCode",
+            "countryCode": "countryCode",
+        }
+        semantic_history_extract_trips(
+            args.source_file,
+            args.output_file,
+            region_mapping[args.region_delimiter],
+        )
+
+    parser_annotate.set_defaults(func=trips_command)
 
     options = parser.parse_args()
     options.func(options)
-
-
-# local_tz = dateutil.tz.tzlocal()
-# local_start_time = start_time.astimezone(local_tz)
-# local_end_time = end_time.astimezone(local_tz)
-# local_duration = local_end_time - local_start_time
-# local_duration_quantized = timedelta(
-#     days=local_duration.days, seconds=local_duration.seconds
-# )
