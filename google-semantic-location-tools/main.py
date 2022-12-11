@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import typing
+from enum import Enum
 from datetime import datetime, timedelta
 import dataclasses
 
@@ -204,9 +205,30 @@ def semantic_history_annotate_place_visits(
     )
 
 
+class TripRegionDelimiter(Enum):
+    PostalCode = "postalcode"
+    AdminMinor = "admin_minor"
+    AdminMajor = "admin_major"
+    Country = "country"
+
+
 def semantic_history_extract_trips(
-    source_file: str, output_file: str, region_delimiter: str
+    source_file: str,
+    output_file: str,
+    region_delimiters: typing.List[TripRegionDelimiter],
 ):
+    _DATE_FMT = "%Y-%m-%d %H:%M %Z"
+    delimiter_to_column_and_rank = {
+        TripRegionDelimiter.PostalCode: ("postalCode", 0),
+        TripRegionDelimiter.AdminMinor: ("adminDistrictMinor", 1),
+        TripRegionDelimiter.AdminMajor: ("adminDistrictMajor", 2),
+        TripRegionDelimiter.Country: ("countryCode", 3),
+    }
+    sorted_delimiters = sorted(
+        region_delimiters, key=lambda r: delimiter_to_column_and_rank[r][1]
+    )
+    delimiter_columns = [delimiter_to_column_and_rank[r][0] for r in sorted_delimiters]
+
     num_trips = 0
     with open(source_file, "r") as source_csv:
         source_field_names = [field.name for field in dataclasses.fields(PlaceVisit)]
@@ -217,7 +239,7 @@ def semantic_history_extract_trips(
         next(csv_reader)
         with open(output_file, "w") as output_csv:
             output_field_names = [
-                region_delimiter,
+                "region",
                 "start_time",
                 "end_time",
                 "duration",
@@ -227,22 +249,29 @@ def semantic_history_extract_trips(
             trip_region: str = None
             trip_start: datetime = None
 
-            def write_trip(region, start_time, end_time):
+            def get_trip_region(visit: PlaceVisitWithAddress) -> str:
+                region = ""
+                for c in delimiter_columns:
+                    r = getattr(visit, c)
+                    region += r + " "
+                return region.rstrip()
+
+            def write_trip(region: str, start_time: datetime, end_time: datetime):
                 duration = end_time - start_time
                 quantized_duration = timedelta(
                     days=duration.days, seconds=duration.seconds
                 )
                 output_row = {
-                    region_delimiter: region,
-                    "start_time": start_time,
-                    "end_time": end_time,
+                    "region": region,
+                    "start_time": start_time.strftime(_DATE_FMT),
+                    "end_time": end_time.strftime(_DATE_FMT),
                     "duration": quantized_duration,
                 }
                 csv_writer.writerow(output_row)
 
             for row in csv_reader:
                 visit = PlaceVisitWithAddress(**row)
-                current_region = getattr(visit, region_delimiter)
+                current_region = get_trip_region(visit)
                 if trip_region != current_region:
                     if trip_region is not None:
                         # A trip completed
@@ -319,23 +348,19 @@ if __name__ == "__main__":
         "source_file", help="CSV file of annotated place visits."
     )
     parser_annotate.add_argument(
-        "--region_delimiter",
-        choices=["adminMajor, adminMinor, postalCode, countryCode"],
-        default="countryCode",
+        "--region_delimiters",
+        help="A combination of country, postalcode, admin_major, admin_minor",
+        type=TripRegionDelimiter,
+        default=TripRegionDelimiter.Country,
+        nargs="+",
     )
     parser_annotate.add_argument("--output_file", default="trips.csv")
 
     def trips_command(args):
-        region_mapping = {
-            "adminMajor": "adminDistrictMajor",
-            "adminMinor": "adminDistrictMinor",
-            "postalCode": "postalCode",
-            "countryCode": "countryCode",
-        }
         semantic_history_extract_trips(
             args.source_file,
             args.output_file,
-            region_mapping[args.region_delimiter],
+            args.region_delimiters,
         )
 
     parser_annotate.set_defaults(func=trips_command)

@@ -25,10 +25,13 @@
                 // "--output_file",
                 // "place_visits_annotated.csv",
                 // TRIPS COMMAND
-                // "trips",
-                // "/Users/gaz/Source/google-semantic-location-tools/place_visits_annotated.csv",
-                // "--output_file",
-                // "trips.csv",
+                "trips",
+                "/Users/gaz/Source/google-semantic-location-tools/place_visits_annotated.csv",
+                "--output_file",
+                "trips.csv",
+                "--region_delimiters",
+                "country",
+                "admin_major"
             ]
         }
     ]
