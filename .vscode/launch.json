@@ -21,17 +21,17 @@
                 // "annotate",
                 // "/Users/gaz/Source/google-semantic-location-tools/place_visits.csv",
                 // "--geolookup_bing_api_key",
-                // "AjUs2O4dJzTxn97x-P3mF4RqDsIjWsGJU0gBl1NRFAY3E5XRnq2OiW7WLZ7NBgXo",
+                // "TBD",
                 // "--output_file",
                 // "place_visits_annotated.csv",
                 // TRIPS COMMAND
-                "trips",
-                "/Users/gaz/Source/google-semantic-location-tools/place_visits_annotated.csv",
-                "--output_file",
-                "trips.csv",
-                "--region_delimiters",
-                "country",
-                "admin_major"
+                // "trips",
+                // "/Users/gaz/Source/google-semantic-location-tools/place_visits_annotated.csv",
+                // "--output_file",
+                // "trips.csv",
+                // "--region_delimiters",
+                // "country",
+                // "admin_major"
             ]
         }
     ]
